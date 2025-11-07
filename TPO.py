@@ -2,13 +2,20 @@
 import sys
 import time
 
-
 # ------------------------------------------------------------
 # FUNCIONES DE LECTURA Y PREPARACIÓN DE DATOS
 # ------------------------------------------------------------
 
-def eliminar_comentario(linea: str) -> str:
-    """Quita los comentarios (// ...) y espacios sobrantes."""
+def eliminar_comentario(linea: str): 
+    """
+    Elimina los comentarios de una línea y los espacios sobrantes.
+
+    Paso a paso:
+    1. Divide la línea en dos partes usando "//" como separador.
+    2. Toma la primera parte (antes del comentario).
+    3. Elimina los espacios en blanco al inicio y al final.
+    4. Devuelve la línea limpia.
+    """
     return linea.split("//")[0].strip()
 
 
@@ -30,8 +37,8 @@ def leer_seccion(lineas, inicio, cantidad, parser):
     return datos
 
 
-def leer_datos(nombre_archivo: str) -> dict:
-    """Lee el archivo del caso y devuelve todos los datos en un diccionario."""
+def leer_datos(nombre_archivo: str):
+    """Lee el archivo del caso y devuelve todos los datos en un diccionario estructurado."""
     try:
         with open(nombre_archivo, 'r') as f:
             lineas = f.readlines()
@@ -77,32 +84,55 @@ def leer_datos(nombre_archivo: str) -> dict:
                 secciones[nombre] = i + 1
 
     # --- PARSERS SIMPLES PARA CADA SECCIÓN ---
-    parse_nodo = lambda l: (int(l.split()[0]), {'x': int(l.split()[1]), 'y': int(l.split()[2])})
-    parse_hub = lambda l: (int(l.split()[0]), float(l.split()[1]))
-    parse_paquete = lambda l: (int(l.split()[0]), {'origen': int(l.split()[1]), 'destino': int(l.split()[2])})
-    parse_arista = lambda l: ((int(l.split()[0]), int(l.split()[1])), float(l.split()[2]))
+
+    def parsear_nodo(linea):
+        partes = linea.split()
+        id_nodo = int(partes[0])
+        x = int(partes[1])
+        y = int(partes[2])
+        return id_nodo, {'x': x, 'y': y}
+
+    def parsear_hub(linea):
+        partes = linea.split()
+        id_hub = int(partes[0])
+        costo = float(partes[1])
+        return id_hub, costo
+
+    def parsear_paquete(linea):
+        partes = linea.split()
+        id_paquete = int(partes[0])
+        origen = int(partes[1])
+        destino = int(partes[2])
+        return id_paquete, {'origen': origen, 'destino': destino}
+
+    def parsear_arista(linea):
+        partes = linea.split()
+        nodo1 = int(partes[0])
+        nodo2 = int(partes[1])
+        peso = float(partes[2])
+        return (nodo1, nodo2), peso
 
     # --- LEER NODOS ---
     if "NODOS" in secciones:
-        nodos_list = leer_seccion(lineas, secciones["NODOS"], datos['configuracion']['num_nodos'], parse_nodo)
+        nodos_list = leer_seccion(lineas, secciones["NODOS"], datos['configuracion']['num_nodos'], parsear_nodo)
         for id_nodo, props in nodos_list:
             datos['nodos'][id_nodo] = props
 
     # --- LEER HUBS ---
     if "HUBS" in secciones:
-        hubs_list = leer_seccion(lineas, secciones["HUBS"], datos['configuracion']['num_hubs'], parse_hub)
+        hubs_list = leer_seccion(lineas, secciones["HUBS"], datos['configuracion']['num_hubs'], parsear_hub)
         for id_hub, costo in hubs_list:
             datos['hubs'][id_hub] = costo
 
     # --- LEER PAQUETES ---
     if "PAQUETES" in secciones:
-        paquetes_list = leer_seccion(lineas, secciones["PAQUETES"], datos['configuracion']['num_paquetes'], parse_paquete)
+        paquetes_list = leer_seccion(lineas, secciones["PAQUETES"], datos['configuracion']['num_paquetes'], parsear_paquete)
         for id_paq, props in paquetes_list:
             datos['paquetes'][id_paq] = props
 
     # --- LEER ARISTAS ---
     if "ARISTAS" in secciones:
-        aristas_list = leer_seccion(lineas, secciones["ARISTAS"], float('inf'), parse_arista)
+        aristas_list = leer_seccion(lineas, secciones["ARISTAS"], float('inf'), parsear_arista)
         for edge, peso in aristas_list:
             datos['aristas'][edge] = peso
             # grafo no dirigido
@@ -117,7 +147,15 @@ def leer_datos(nombre_archivo: str) -> dict:
 # ------------------------------------------------------------
 
 def floyd_warshall(aristas, num_nodos):
-    """Calcula las distancias mínimas entre todos los nodos."""
+    """
+    Calcula las distancias mínimas entre todos los nodos del grafo usando el algoritmo de Floyd-Warshall.
+
+    Paso a paso:
+    1. Inicializa la matriz de distancias con infinito para todas las parejas, excepto la diagonal con 0.
+    2. Para cada arista directa, establece la distancia como el peso dado.
+    3. Para cada nodo intermedio k, actualiza las distancias entre i y j si pasando por k es más corto.
+    4. Devuelve la matriz de distancias mínimas.
+    """
     dist = [[float('inf')] * num_nodos for _ in range(num_nodos)]
     for i in range(num_nodos):
         dist[i][i] = 0
@@ -125,100 +163,128 @@ def floyd_warshall(aristas, num_nodos):
         dist[u][v] = peso
         dist[v][u] = peso
 
+    # Aplicar el algoritmo de Floyd-Warshall para calcular distancias mínimas
     for k in range(num_nodos):
         for i in range(num_nodos):
             for j in range(num_nodos):
-                if dist[i][k] + dist[k][j] < dist[i][j]:
+                if dist[i][j] > dist[i][k] + dist[k][j]:
                     dist[i][j] = dist[i][k] + dist[k][j]
+
     return dist
 
 
+
 # ------------------------------------------------------------
-# BÚSQUEDA DE RUTA Y HUBS (VERSIÓN SIMPLE Y CLARA)
+# BACKTRACKING: SELECCIÓN DE HUBS Y RUTA ÓPTIMA
 # ------------------------------------------------------------
 
 def calcular_mejor_camino(datos, matriz):
-    """Decide qué hubs activar y calcula una ruta razonable con menor costo."""
+    """Explora combinaciones de hubs activados mediante backtracking 
+    y calcula la ruta de menor costo total (distancia + activación)."""
 
     deposito = datos['configuracion']['deposito_id']
     capacidad = datos['configuracion']['capacidad_camion']
-    hubs = list(datos['hubs'].keys())
+    hubs = sorted(list(datos['hubs'].keys()), key=lambda x: datos['hubs'][x])
     costo_hubs = datos['hubs']
 
-    # Agrupar cuántos paquetes van a cada destino
+    # Agrupa los paquetes por destino
     paquetes_por_destino = {}
-    for _, paquete in datos['paquetes'].items():
+    for clave, paquete in datos['paquetes'].items():
         destino = paquete['destino']
         paquetes_por_destino[destino] = paquetes_por_destino.get(destino, 0) + 1
 
-    # Valores iniciales
+    # Variables globales del mejor resultado encontrado
     mejor_costo = float('inf')
     mejor_hubs = []
     mejor_ruta = []
     mejor_distancia = 0
 
-    # Recorremos todas las combinaciones posibles de hubs activados (simple)
-    for i in range(2 ** len(hubs)):
-        hubs_activos = []
-        costo_activacion = 0
 
-        for j, hub in enumerate(hubs):
-            if (i >> j) & 1:  # si el bit está encendido, el hub se activa
-                hubs_activos.append(hub)
-                costo_activacion += costo_hubs[hub]
 
-        # Armar los viajes del camión
-        destinos = list(paquetes_por_destino.keys())
-        viajes = []
-        viaje_actual = []
-        carga_actual = 0
+    # ---------------------------------------------------------
+    # Función recursiva de backtracking
+    # ---------------------------------------------------------
+    def probar_combinaciones(indice, hubs_activos, costo_activacion):
+        nonlocal mejor_costo, mejor_hubs, mejor_ruta, mejor_distancia #//TODO
 
-        # dividir los destinos en grupos que respeten la capacidad del camión
-        for d in destinos:
-            cant = paquetes_por_destino[d]
-            if carga_actual + cant > capacidad:
+        # Poda: si el costo de activación ya supera el mejor costo total encontrado, no continuar
+        if costo_activacion >= mejor_costo:
+            return
+
+        # Caso base: se decidió sobre todos los hubs
+        if indice == len(hubs):
+            destinos = list(paquetes_por_destino.keys())
+            viajes = []
+            viaje_actual = []
+            carga_actual = 0
+
+            # Agrupar destinos respetando la capacidad del camión
+            for d in destinos:
+                cant = paquetes_por_destino[d]
+                if carga_actual + cant > capacidad:
+                    viajes.append(viaje_actual)
+                    viaje_actual = []
+                    carga_actual = 0
+                viaje_actual.append(d)
+                carga_actual += cant
+            if viaje_actual:
                 viajes.append(viaje_actual)
-                viaje_actual = []
-                carga_actual = 0
-            viaje_actual.append(d)
-            carga_actual += cant
-        if viaje_actual:
-            viajes.append(viaje_actual)
 
-        # Calcular distancia total de todos los viajes
-        distancia_total = 0
-        ruta_total = [deposito]
+            # Calcular distancia total
+            distancia_total = 0
+            ruta_total = [deposito]
 
-        for viaje in viajes:
-            mejor_inicio = deposito
-            menor_distancia_viaje = float('inf')
+            for viaje in viajes:
+                # Usar el orden de destinos sin heurística
+                viaje_ordenado = viaje
 
-            # probar comenzar desde el depósito o desde algún hub activo
-            for punto_inicio in [deposito] + hubs_activos:
-                distancia_viaje = matriz[punto_inicio][viaje[0]]
-                for k in range(len(viaje) - 1):
-                    distancia_viaje += matriz[viaje[k]][viaje[k + 1]]
-                distancia_viaje += matriz[viaje[-1]][deposito]
-                if distancia_viaje < menor_distancia_viaje:
-                    menor_distancia_viaje = distancia_viaje
-                    mejor_inicio = punto_inicio
+                mejor_inicio = deposito
+                menor_distancia_viaje = float('inf')
 
-            distancia_total += menor_distancia_viaje
-            ruta_total.append(mejor_inicio)
-            for d in viaje:
-                ruta_total.append(d)
-            ruta_total.append(deposito)
+                # Probar salir desde el depósito o un hub activo
+                for punto_inicio in [deposito] + hubs_activos:
+                    distancia_viaje = matriz[punto_inicio][viaje_ordenado[0]]
+                    for k in range(len(viaje_ordenado) - 1):
+                        distancia_viaje += matriz[viaje_ordenado[k]][viaje_ordenado[k + 1]]
+                    distancia_viaje += matriz[viaje_ordenado[-1]][deposito]
 
-        costo_total = distancia_total + costo_activacion
+                    if distancia_viaje < menor_distancia_viaje:
+                        menor_distancia_viaje = distancia_viaje
+                        mejor_inicio = punto_inicio
 
-        if costo_total < mejor_costo:
-            mejor_costo = costo_total
-            mejor_hubs = hubs_activos
-            mejor_ruta = ruta_total
-            mejor_distancia = distancia_total
+                distancia_total += menor_distancia_viaje
+                ruta_total.append(mejor_inicio)
+                for d in viaje_ordenado:
+                    ruta_total.append(d)
+                ruta_total.append(deposito)
+
+            costo_total = distancia_total + costo_activacion
+
+            # Actualizar mejor combinación encontrada
+            if costo_total < mejor_costo:
+                mejor_costo = costo_total
+                mejor_hubs = hubs_activos[:]
+                mejor_ruta = ruta_total[:]
+                mejor_distancia = distancia_total
+
+            return  # Fin de la rama
+
+        # ---------------------------------------------------------
+        # Paso recursivo: decidir activar o no el hub actual
+        # ---------------------------------------------------------
+        # No activar el hub
+        probar_combinaciones(indice + 1, hubs_activos, costo_activacion)
+
+        # Activar el hub actual
+        hub_actual = hubs[indice]
+        hubs_activos.append(hub_actual)
+        probar_combinaciones(indice + 1, hubs_activos, costo_activacion + costo_hubs[hub_actual])
+        hubs_activos.pop()  # volver atrás (backtracking)
+
+    # Llamada inicial
+    probar_combinaciones(0, [], 0)
 
     costo_solo_hubs = mejor_costo - mejor_distancia
-
     return mejor_ruta, mejor_hubs, mejor_costo, mejor_distancia, costo_solo_hubs
 
 
@@ -227,7 +293,7 @@ def calcular_mejor_camino(datos, matriz):
 # ------------------------------------------------------------
 
 def main():
-    if len(sys.argv) != 2:
+    if len(sys.argv) != 2: 
         print(f"Uso: {sys.argv[0]} <archivo_caso.txt>")
         sys.exit(1)
 
@@ -251,7 +317,7 @@ def main():
     with open("solucion.txt", "w") as f:
         f.write("// --- HUBS ACTIVADOS ---\n")
         for h in hubs:
-            f.write(f"{h}\n")
+            f.write(f"ID_HUB_{h}\n")
         f.write("\n// --- RUTA OPTIMA ---\n")
         f.write(" -> ".join(map(str, ruta)) + "\n")
         f.write("\n// --- METRICAS ---\n")
@@ -260,7 +326,7 @@ def main():
         f.write(f"COSTO_HUBS: {costo_hubs:.2f}\n")
         f.write(f"TIEMPO_EJECUCION: {duracion:.6f} segundos\n")
 
-    print("Archivo solucion.txt generado con éxito.")
+    print("\nArchivo solucion.txt generado con éxito.")
 
 
 if __name__ == "__main__":
